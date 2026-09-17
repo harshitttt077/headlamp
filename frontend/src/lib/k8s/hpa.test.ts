@@ -86,4 +86,152 @@ describe('HPA class', () => {
     expect(metrics[0].value).toBe('0% (0m)/0%');
     expect(metrics[0].shortValue).toBe('0% /0%');
   });
+
+  it('correctly handles averageUtilization of 0 in ContainerResource metricValueStatus', () => {
+    const hpa = new HPA({
+      ...mockHpaData,
+      spec: {
+        ...mockHpaData.spec,
+        metrics: [
+          {
+            type: 'ContainerResource',
+            containerResource: {
+              container: 'main-app',
+              name: 'cpu',
+              target: {
+                type: 'Utilization',
+                averageUtilization: 50,
+              },
+            },
+          },
+        ],
+      },
+      status: {
+        ...mockHpaData.status,
+        currentMetrics: [
+          {
+            type: 'ContainerResource',
+            containerResource: {
+              container: 'main-app',
+              name: 'cpu',
+              current: {
+                averageUtilization: 0,
+              },
+            },
+          },
+        ],
+      },
+    } as any);
+
+    const mockT = (key: string) =>
+      key.includes('translation|') ? key.replace('translation|', '') : key;
+    const metrics = hpa.metrics(mockT);
+    expect(metrics).toHaveLength(1);
+    expect(metrics[0].value).toBe('0%/50%');
+    expect(metrics[0].shortValue).toBe('0%/50%');
+  });
+
+  it('safely handles undefined averageUtilization in Resource utilization without rendering undefined%', () => {
+    const hpa = new HPA({
+      ...mockHpaData,
+      spec: {
+        ...mockHpaData.spec,
+        metrics: [
+          {
+            type: 'Resource',
+            resource: {
+              name: 'cpu',
+              target: {
+                type: 'Utilization',
+                averageUtilization: 80,
+              },
+            },
+          },
+        ],
+      },
+      status: {
+        ...mockHpaData.status,
+        currentMetrics: [
+          {
+            type: 'Resource',
+            resource: {
+              name: 'cpu',
+              current: {},
+            },
+          },
+        ],
+      },
+    } as any);
+
+    const mockT = (key: string) =>
+      key.includes('translation|') ? key.replace('translation|', '') : key;
+    const metrics = hpa.metrics(mockT);
+    expect(metrics).toHaveLength(1);
+    expect(metrics[0].value).toBe('<unknown>/80%');
+    expect(metrics[0].shortValue).toBe('<unknown>/80%');
+  });
+
+  it('correctly correlates status.currentMetrics when order differs from spec.metrics', () => {
+    const hpa = new HPA({
+      ...mockHpaData,
+      spec: {
+        ...mockHpaData.spec,
+        metrics: [
+          {
+            type: 'Resource',
+            resource: {
+              name: 'cpu',
+              target: {
+                type: 'Utilization',
+                averageUtilization: 80,
+              },
+            },
+          },
+          {
+            type: 'Resource',
+            resource: {
+              name: 'memory',
+              target: {
+                type: 'AverageValue',
+                averageValue: '500Mi',
+              },
+            },
+          },
+        ],
+      },
+      status: {
+        ...mockHpaData.status,
+        currentMetrics: [
+          {
+            type: 'Resource',
+            resource: {
+              name: 'memory',
+              current: {
+                averageValue: '250Mi',
+              },
+            },
+          },
+          {
+            type: 'Resource',
+            resource: {
+              name: 'cpu',
+              current: {
+                averageUtilization: 40,
+                averageValue: '400m',
+              },
+            },
+          },
+        ],
+      },
+    } as any);
+
+    const mockT = (key: string) =>
+      key.includes('translation|') ? key.replace('translation|', '') : key;
+    const metrics = hpa.metrics(mockT);
+    expect(metrics).toHaveLength(2);
+    expect(metrics[0].name).toBe('cpu');
+    expect(metrics[0].value).toBe('40% (400m)/80%');
+    expect(metrics[1].name).toBe('memory');
+    expect(metrics[1].value).toBe('250Mi/500Mi');
+  });
 });

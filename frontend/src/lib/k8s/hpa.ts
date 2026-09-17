@@ -44,7 +44,7 @@ interface MetricValueStatus {
 }
 
 function metricValueStatus(status: MetricValueStatus, t: Function): string {
-  if (status.averageUtilization) {
+  if (status.averageUtilization !== undefined && status.averageUtilization !== null) {
     return `${status.averageUtilization}%`;
   }
   if (status.averageValue) {
@@ -211,7 +211,23 @@ class HPA extends KubeObject<KubeHPA> {
     const specMetrics = this.spec?.metrics || [];
     for (let iter = 0; iter < specMetrics.length; iter++) {
       const spec = specMetrics[iter];
-      const status = this.status?.currentMetrics?.[iter];
+      const status =
+        this.status?.currentMetrics?.find(m => {
+          if (m.type !== spec.type) return false;
+          if (spec.type === 'Resource') return m.resource?.name === spec.resource?.name;
+          if (spec.type === 'ContainerResource') {
+            return (
+              m.containerResource?.container === spec.containerResource?.container &&
+              m.containerResource?.name === spec.containerResource?.name
+            );
+          }
+          if (spec.type === 'External') {
+            return m.external?.metric?.name === spec.external?.metric?.name;
+          }
+          if (spec.type === 'Pods') return m.pods?.metric?.name === spec.pods?.metric?.name;
+          if (spec.type === 'Object') return m.object?.metric?.name === spec.object?.metric?.name;
+          return false;
+        }) ?? this.status?.currentMetrics?.[iter];
       switch (spec.type) {
         case 'External':
           {
@@ -302,28 +318,22 @@ class HPA extends KubeObject<KubeHPA> {
               }
               if (spec.resource.target.type === 'Utilization') {
                 definition = `${definition} ${defineMetricTarget(spec.resource.target)}`;
-                if (status) {
-                  value = `${
-                    status.resource
-                      ? status.resource.current.averageUtilization
-                      : t('translation|<unknown>')
-                  }% (${
-                    status.resource
-                      ? status.resource.current.averageValue
-                      : t('translation|<unknown>')
-                  })/${metricTargetValue(spec.resource.target)}`;
-                  shortValue = `${
-                    status.resource
-                      ? status.resource.current.averageUtilization
-                      : t('translation|<unknown>')
-                  }% /${metricTargetValue(spec.resource.target)}`;
+                const targetVal = metricTargetValue(spec.resource.target);
+                const currentUtil =
+                  status?.resource?.current?.averageUtilization !== undefined &&
+                  status?.resource?.current?.averageUtilization !== null
+                    ? `${status.resource.current.averageUtilization}%`
+                    : t('translation|<unknown>');
+                const currentAvgVal = status?.resource?.current?.averageValue;
+
+                if (currentUtil !== t('translation|<unknown>')) {
+                  value = currentAvgVal
+                    ? `${currentUtil} (${currentAvgVal})/${targetVal}`
+                    : `${currentUtil}/${targetVal}`;
+                  shortValue = `${currentUtil} /${targetVal}`;
                 } else {
-                  value = `${t('translation|<unknown>')}/${metricTargetValue(
-                    spec.resource.target
-                  )}`;
-                  shortValue = `${t('translation|<unknown>')}/${metricTargetValue(
-                    spec.resource.target
-                  )}`;
+                  value = `${currentUtil}/${targetVal}`;
+                  shortValue = `${currentUtil}/${targetVal}`;
                 }
               }
               metrics.push({
